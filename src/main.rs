@@ -21,6 +21,7 @@ struct Args {
 
 lazy_static! {
     static ref IMAGE_SELECTOR: Selector = Selector::parse("div.mw-content-container img").unwrap();
+    static ref CLIENT: reqwest::Client = reqwest::Client::new();
 }
 
 
@@ -30,7 +31,7 @@ async fn save_image(mut link: String, mut out: PathBuf) {
 
     link.insert_str(0, "http:");
 
-    let res = reqwest::get(link).await.unwrap();
+    let res = CLIENT.get(link).send().await.unwrap();
     assert_eq!(res.status(), 200);
     let bytes = res.bytes().await.unwrap();
 
@@ -40,7 +41,7 @@ async fn save_image(mut link: String, mut out: PathBuf) {
 }
 
 async fn get_links(url: &str) -> anyhow::Result<impl Iterator<Item=String>> {
-    let res = reqwest::get(url).await?;
+    let res = CLIENT.get(url).send().await?;
     assert_eq!(res.status(), 200);
     let body = res.text().await?;
 
