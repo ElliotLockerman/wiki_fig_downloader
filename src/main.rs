@@ -3,23 +3,9 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use tokio::io::AsyncWriteExt;
-use sxd_xpath::{Value, nodeset::Node};
-use sxd_document::Package;
-
-macro_rules! cast {
-    ($target: expr, $pat: path) => {
-        {
-            if let $pat(a) = $target { // #1
-                a
-            } else {
-                panic!(
-                    "mismatch variant when cast to {}", 
-                    stringify!($pat)); // #2
-            }
-        }
-    };
-}
-
+use scraper::{Html, Selector};
+use futures::stream::{FuturesUnordered, StreamExt};
+use lazy_static::lazy_static;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -31,16 +17,11 @@ struct Args {
     out: String,
 }
 
-async fn get_page(page_url: &String) -> Package {
-    let res = reqwest::get(page_url).await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body = res.text().await.unwrap();
 
-    sxd_html::parse_html(body.as_str())
+
+lazy_static! {
+    static ref IMAGE_SELECTOR: Selector = Selector::parse("div.mw-content-container img").unwrap();
 }
-
-
- const IMAGE_XPATH: &str = r#"//div[@class="mw-content-container"]//img/@src"#;
 
 
 async fn save_image(mut link: String, mut out: PathBuf) {
@@ -58,26 +39,35 @@ async fn save_image(mut link: String, mut out: PathBuf) {
     println!("{name} done");
 }
 
+async fn get_links(url: &str) -> anyhow::Result<impl Iterator<Item=String>> {
+    let res = reqwest::get(url).await?;
+    assert_eq!(res.status(), 200);
+    let body = res.text().await?;
+
+    let html = Html::parse_document(&body);
+    let imgs = html.select(&IMAGE_SELECTOR); 
+    Ok(
+        imgs
+            .filter_map(|x| x.attr("src").map(str::to_owned))
+            .collect::<Vec<_>>()
+            .into_iter()
+    )
+
+}
+
 // TODO: get highest resolution available
 async fn run(page_url: String, out: PathBuf) {
-    let page = get_page(&page_url).await;
+    let links = match get_links(&page_url).await {
+        Ok(x) => x,
+        Err(e) => panic!("Error getting links: {e}"),
+    };
 
-    let document = page.as_document();
-    let value = sxd_xpath::evaluate_xpath(&document, IMAGE_XPATH).unwrap();
-    let nodes = cast!(value, Value::Nodeset);
-    let jhs: Vec<_> = nodes
-        .document_order()
-        .iter()
-        .map(|node| {
-            let link = cast!(node, Node::Attribute).value().to_string();
-            let out = out.clone();
-            tokio::spawn(async move { save_image(link, out.into()).await })
-        })
-        .collect();
-    
-    for jh in jhs {
-        jh.await.unwrap();
-    }
+    let mut stream = FuturesUnordered::from_iter(links)
+        .into_iter()
+        .map(|x| save_image(x, out.clone()))
+        .collect::<FuturesUnordered<_>>();
+
+    while let Some(_) = stream.next().await { }
 }
 
 #[tokio::main]
