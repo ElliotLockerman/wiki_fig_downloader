@@ -1,0 +1,16 @@
+[package]
+name = "wiki_img_downloader"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+amxml = "0.5.3"
+clap = { version = "4.4.6", features = ["derive"] }
+reqwest = "0.11.22"
+sxd-document = "0.3.2"
+sxd-xpath = "0.4.2"
+sxd_html = "0.1.1"
+tokio = { version = "1", features = ["full"] }
+
