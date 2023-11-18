@@ -55,7 +55,7 @@ async fn save_image(mut url: String, mut out: PathBuf) {
     }
 }
 
-async fn get_links(url: &str) -> anyhow::Result<impl Iterator<Item=String>> {
+async fn get_image_srcs(url: &str, selec: &Selector) -> anyhow::Result<impl Iterator<Item=String>> {
     let res = CLIENT.get(url).send().await?;
     if res.status() !=  200 {
         bail!("'{}' got status {}", url, res.status());
@@ -63,7 +63,7 @@ async fn get_links(url: &str) -> anyhow::Result<impl Iterator<Item=String>> {
     let body = res.text().await?;
 
     let html = Html::parse_document(&body);
-    let imgs = html.select(&IMAGE_SELECTOR); 
+    let imgs = html.select(selec); 
     Ok(
         imgs
             .filter_map(|x| x.attr("src").map(str::to_owned))
@@ -74,14 +74,14 @@ async fn get_links(url: &str) -> anyhow::Result<impl Iterator<Item=String>> {
 
 // TODO: get highest resolution available
 async fn run(page_url: String, out: PathBuf) {
-    let links = match get_links(&page_url).await {
+    let srcs = match get_image_srcs(&page_url, &IMAGE_SELECTOR).await {
         Ok(x) => x,
         Err(e) => panic!("Error getting links: {e}"),
     };
 
-    let mut stream = FuturesUnordered::from_iter(links)
+    let mut stream = FuturesUnordered::from_iter(srcs)
         .into_iter()
-        .map(|url| save_image(url, out.clone()))
+        .map(|srcs| save_image(srcs, out.clone()))
         .collect::<FuturesUnordered<_>>();
 
     while let Some(_) = stream.next().await { }
