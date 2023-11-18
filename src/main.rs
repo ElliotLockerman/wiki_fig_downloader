@@ -39,7 +39,7 @@ async fn save_image(mut url: String, mut out: PathBuf) {
 
         let res = CLIENT.get(url.clone()).send().await?;
         if res.status() !=  200 {
-            bail!("Error: '{}' got status {}", url, res.status());
+            bail!("got status {}", res.status());
         }
 
         let bytes = res.bytes().await?;
@@ -51,14 +51,14 @@ async fn save_image(mut url: String, mut out: PathBuf) {
     })().await;
 
     if let Err(e) = res {
-        eprintln!("Error downloading '{url}': {e}");
+        eprintln!("error downloading '{url}': {e}");
     }
 }
 
 async fn get_image_srcs(url: &str, selec: &Selector) -> anyhow::Result<impl Iterator<Item=String>> {
     let res = CLIENT.get(url).send().await?;
     if res.status() !=  200 {
-        bail!("'{}' got status {}", url, res.status());
+        bail!("got status {}", res.status());
     }
     let body = res.text().await?;
 
@@ -76,7 +76,7 @@ async fn get_image_srcs(url: &str, selec: &Selector) -> anyhow::Result<impl Iter
 async fn run(page_url: String, out: PathBuf) {
     let srcs = match get_image_srcs(&page_url, &IMAGE_SELECTOR).await {
         Ok(x) => x,
-        Err(e) => panic!("Error getting links: {e}"),
+        Err(e) => panic!("Error getting links for {page_url}: {e}"),
     };
 
     let mut stream = FuturesUnordered::from_iter(srcs)
