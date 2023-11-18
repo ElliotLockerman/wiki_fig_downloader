@@ -6,6 +6,7 @@ use tokio::io::AsyncWriteExt;
 use scraper::{Html, Selector};
 use futures::stream::{FuturesUnordered, StreamExt};
 use lazy_static::lazy_static;
+use anyhow::{bail, anyhow};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -20,29 +21,45 @@ struct Args {
 
 
 lazy_static! {
-    static ref IMAGE_SELECTOR: Selector = Selector::parse("div.mw-content-container img").unwrap();
+    static ref IMAGE_SELECTOR: Selector = Selector::parse("div.mw-content-container a.mw-file-description > img").unwrap();
     static ref CLIENT: reqwest::Client = reqwest::Client::new();
 }
 
 
-async fn save_image(mut link: String, mut out: PathBuf) {
-    let name = link.rsplit("/").next().unwrap().to_owned();
-    out.push(name.clone());
+async fn save_image(mut url: String, mut out: PathBuf) {
+    let res: anyhow::Result<()> = (|| async {
+        let name = url.rsplit("/").next().ok_or_else(|| anyhow!("No filename"))?.to_owned();
+        out.push(name.clone());
+        if out.exists() {
+            println!("{name} already exists");
+            return Ok(());
+        }
 
-    link.insert_str(0, "http:");
+        url.insert_str(0, "http:");
 
-    let res = CLIENT.get(link).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let bytes = res.bytes().await.unwrap();
+        let res = CLIENT.get(url.clone()).send().await?;
+        if res.status() !=  200 {
+            bail!("Error: '{}' got status {}", url, res.status());
+        }
 
-    let mut file  = tokio::fs::File::create(out).await.unwrap();
-    file.write_all(&bytes[..]).await.unwrap();
-    println!("{name} done");
+        let bytes = res.bytes().await?;
+
+        let mut file  = tokio::fs::File::create(out).await?;
+        file.write_all(&bytes[..]).await?;
+        println!("{name} done");
+        Ok(())
+    })().await;
+
+    if let Err(e) = res {
+        eprintln!("Error downloading '{url}': {e}");
+    }
 }
 
 async fn get_links(url: &str) -> anyhow::Result<impl Iterator<Item=String>> {
     let res = CLIENT.get(url).send().await?;
-    assert_eq!(res.status(), 200);
+    if res.status() !=  200 {
+        bail!("'{}' got status {}", url, res.status());
+    }
     let body = res.text().await?;
 
     let html = Html::parse_document(&body);
@@ -53,7 +70,6 @@ async fn get_links(url: &str) -> anyhow::Result<impl Iterator<Item=String>> {
             .collect::<Vec<_>>()
             .into_iter()
     )
-
 }
 
 // TODO: get highest resolution available
@@ -65,7 +81,7 @@ async fn run(page_url: String, out: PathBuf) {
 
     let mut stream = FuturesUnordered::from_iter(links)
         .into_iter()
-        .map(|x| save_image(x, out.clone()))
+        .map(|url| save_image(url, out.clone()))
         .collect::<FuturesUnordered<_>>();
 
     while let Some(_) = stream.next().await { }
