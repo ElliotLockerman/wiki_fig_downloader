@@ -1,5 +1,5 @@
 [package]
-name = "wiki_img_downloader"
+name = "wiki_fig_downloader"
 version = "0.1.0"
 edition = "2021"
 

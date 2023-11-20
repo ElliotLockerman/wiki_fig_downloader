@@ -18,9 +18,12 @@ struct Args {
 }
 
 lazy_static! {
-    static ref IMAGE_PAGE_SELECTOR: Selector =
-        Selector::parse("div.mw-content-container a.mw-file-description").unwrap();
-    static ref FULL_RES_SELECTOR: Selector =
+    // Selects all <a> tags around images.
+    static ref IMAGE_LINK_SELECTOR: Selector =
+        Selector::parse("figure a.mw-file-description").unwrap();
+
+    // Selects the "Original file" link on an image's page.
+    static ref ORIGINAL_SELECTOR: Selector =
         Selector::parse(".fullMedia > p > a.internal").unwrap();
     static ref CLIENT: reqwest::Client = reqwest::Client::new();
 }
@@ -68,7 +71,7 @@ async fn download_original(mut url: String, out: PathBuf) {
         // TODO: right language url
         url.insert_str(0, "https://en.wikipedia.org");
 
-        let mut hrefs = get_elem_attrs(&url, &FULL_RES_SELECTOR, "href")
+        let mut hrefs = get_elem_attrs(&url, &ORIGINAL_SELECTOR, "href")
             .await
             .map_err(|e| anyhow!("error finding full-res: {e}"))?;
 
@@ -113,11 +116,12 @@ async fn get_elem_attrs(
 
 // TODO: get highest resolution available
 async fn run(page_url: String, out: PathBuf) {
-    let srcs = match get_elem_attrs(&page_url, &IMAGE_PAGE_SELECTOR, "href").await {
+    let srcs = match get_elem_attrs(&page_url, &IMAGE_LINK_SELECTOR, "href").await {
         Ok(x) => x,
         Err(e) => panic!("Error getting links for {page_url}: {e}"),
     };
 
+    // NB: this allows unlimited concurrency, which may be undesirable.
     let mut stream = FuturesUnordered::from_iter(srcs)
         .into_iter()
         .map(|src| download_original(src, out.clone()))
