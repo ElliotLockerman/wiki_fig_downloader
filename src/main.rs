@@ -21,7 +21,12 @@ struct Args {
 
 
 lazy_static! {
-    static ref IMAGE_SELECTOR: Selector = Selector::parse("div.mw-content-container a.mw-file-description > img").unwrap();
+    static ref IMAGE_PAGE_SELECTOR: Selector = 
+        Selector::parse("div.mw-content-container a.mw-file-description").unwrap();
+
+    static ref FULL_RES_SELECTOR: Selector = 
+        Selector::parse(".fullMedia > p > a.internal").unwrap();
+
     static ref CLIENT: reqwest::Client = reqwest::Client::new();
 }
 
@@ -35,9 +40,12 @@ async fn save_image(mut url: String, mut out: PathBuf) {
             return Ok(());
         }
 
-        url.insert_str(0, "http:");
+        url.insert_str(0, "https:");
 
-        let res = CLIENT.get(url.clone()).send().await?;
+        let res = CLIENT
+            .get(url.clone())
+            .header("User-Agent", "TestBot")
+            .send().await?;
         if res.status() !=  200 {
             bail!("got status {}", res.status());
         }
@@ -55,7 +63,32 @@ async fn save_image(mut url: String, mut out: PathBuf) {
     }
 }
 
-async fn get_image_srcs(url: &str, selec: &Selector) -> anyhow::Result<impl Iterator<Item=String>> {
+async fn download_original(mut url: String, out: PathBuf) {
+    let res: anyhow::Result<()> = (|| async {
+
+        // TODO: right language url
+        url.insert_str(0, "https://en.wikipedia.org");
+
+        let mut hrefs = get_elem_attrs(&url, &FULL_RES_SELECTOR, "href").await
+            .map_err(|e| anyhow!("error finding full-res: {e}"))?;
+
+        match (hrefs.next(), hrefs.next()) {
+            (None, None) =>  bail!("No full-resolution images found for {url}"),
+            (Some(x), None) => { save_image(x, out).await; Ok(())},
+            (Some(x), Some(_)) => {
+                save_image(x, out).await;
+                bail!("Too many full-resolution images found, ignoring rest");
+            },
+            (None, Some(_)) => unreachable!(),
+        }
+    })().await;
+    if let Err(e) = res {
+        eprintln!("Error with '{url}': {e}");
+    }
+}
+
+// Skips nodes without the attr
+async fn get_elem_attrs(url: &str, selec: &Selector, attr: &str) -> anyhow::Result<impl Iterator<Item=String>> {
     let res = CLIENT.get(url).send().await?;
     if res.status() !=  200 {
         bail!("got status {}", res.status());
@@ -66,7 +99,7 @@ async fn get_image_srcs(url: &str, selec: &Selector) -> anyhow::Result<impl Iter
     let imgs = html.select(selec); 
     Ok(
         imgs
-            .filter_map(|x| x.attr("src").map(str::to_owned))
+            .filter_map(|x| x.attr(attr).map(str::to_owned))
             .collect::<Vec<_>>()
             .into_iter()
     )
@@ -74,14 +107,14 @@ async fn get_image_srcs(url: &str, selec: &Selector) -> anyhow::Result<impl Iter
 
 // TODO: get highest resolution available
 async fn run(page_url: String, out: PathBuf) {
-    let srcs = match get_image_srcs(&page_url, &IMAGE_SELECTOR).await {
+    let srcs = match get_elem_attrs(&page_url, &IMAGE_PAGE_SELECTOR, "href").await {
         Ok(x) => x,
         Err(e) => panic!("Error getting links for {page_url}: {e}"),
     };
 
     let mut stream = FuturesUnordered::from_iter(srcs)
         .into_iter()
-        .map(|srcs| save_image(srcs, out.clone()))
+        .map(|src| download_original(src, out.clone()))
         .collect::<FuturesUnordered<_>>();
 
     while let Some(_) = stream.next().await { }
