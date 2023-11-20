@@ -69,7 +69,9 @@ async fn download_original(mut url: String, out: PathBuf) {
             .await
             .map_err(|e| anyhow!("error finding full-res: {e}"))?;
 
-        let link = hrefs.next().ok_or(anyhow!("No full-resolution images found"))?;
+        let link = hrefs
+            .next()
+            .ok_or(anyhow!("No full-resolution images found"))?;
         save_image(link, out).await?;
 
         if let Some(_) = hrefs.next() {
