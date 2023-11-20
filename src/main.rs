@@ -25,68 +25,58 @@ lazy_static! {
     // Selects the "Original file" link on an image's page.
     static ref ORIGINAL_SELECTOR: Selector =
         Selector::parse(".fullMedia > p > a.internal").unwrap();
+
     static ref CLIENT: reqwest::Client = reqwest::Client::new();
 }
 
-async fn save_image(mut url: String, mut out: PathBuf) {
-    let res: anyhow::Result<()> = (|| async {
-        let name = url
-            .rsplit("/")
-            .next()
-            .ok_or_else(|| anyhow!("No filename"))?
-            .to_owned();
-        out.push(name.clone());
-        if out.exists() {
-            println!("{name} already exists");
-            return Ok(());
-        }
-
-        url.insert_str(0, "https:");
-
-        let res = CLIENT
-            .get(url.clone())
-            .header("User-Agent", "TestBot")
-            .send()
-            .await?;
-        if res.status() != 200 {
-            bail!("got status {}", res.status());
-        }
-
-        let bytes = res.bytes().await?;
-
-        let mut file = tokio::fs::File::create(out).await?;
-        file.write_all(&bytes[..]).await?;
-        println!("{name} done");
-        Ok(())
-    })()
-    .await;
-
-    if let Err(e) = res {
-        eprintln!("error downloading '{url}': {e}");
+async fn save_image(mut url: String, mut out: PathBuf) -> anyhow::Result<()> {
+    let name = url
+        .rsplit("/")
+        .next()
+        .ok_or_else(|| anyhow!("No filename"))?
+        .to_owned();
+    out.push(name.clone());
+    if out.exists() {
+        println!("{name} already exists");
+        return Ok(());
     }
+
+    url.insert_str(0, "https:");
+
+    let res = CLIENT
+        .get(url.clone())
+        .header("User-Agent", "TestBot")
+        .send()
+        .await?;
+    if res.status() != 200 {
+        bail!("got status {}", res.status());
+    }
+
+    let bytes = res.bytes().await?;
+
+    let mut file = tokio::fs::File::create(out).await?;
+    file.write_all(&bytes[..]).await?;
+    println!("{name} done");
+    Ok(())
 }
 
 async fn download_original(mut url: String, out: PathBuf) {
     let res: anyhow::Result<()> = (|| async {
-        // TODO: right language url
+        // TODO: right language url based on original link
         url.insert_str(0, "https://en.wikipedia.org");
 
         let mut hrefs = get_elem_attrs(&url, &ORIGINAL_SELECTOR, "href")
             .await
             .map_err(|e| anyhow!("error finding full-res: {e}"))?;
 
-        match (hrefs.next(), hrefs.next()) {
-            (None, None) => bail!("No full-resolution images found for {url}"),
-            (Some(x), None) => {
-                save_image(x, out).await;
-                Ok(())
-            }
-            (Some(x), Some(_)) => {
-                save_image(x, out).await;
-                bail!("Too many full-resolution images found, ignoring rest");
-            }
-            (None, Some(_)) => unreachable!(),
+        let link = hrefs.next().ok_or(anyhow!("No full-resolution images found"))?;
+        save_image(link, out).await?;
+
+        if let Some(_) = hrefs.next() {
+            eprintln!("Warning: multiple originals found for {url}, ignoring rest");
         }
+
+        Ok(())
     })()
     .await;
     if let Err(e) = res {
