@@ -106,7 +106,6 @@ async fn get_elem_attrs(
         .into_iter())
 }
 
-// TODO: get highest resolution available
 async fn run(page_url: String, out: PathBuf) {
     let srcs = match get_elem_attrs(&page_url, &IMAGE_LINK_SELECTOR, "href").await {
         Ok(x) => x,
